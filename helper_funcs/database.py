@@ -1,63 +1,34 @@
 import os
+from mongoengine import connect, Document, IntField
 
+# Load config based on environment
 if bool(os.environ.get("WEBHOOK", False)):
     from sample_config import Config
 else:
     from config import Config
 
-import threading
+# Connect to MongoDB
+connect(db="sankar", host=Config.DB_URI)
 
-from sqlalchemy import create_engine
-from sqlalchemy import Column, Integer
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
+# Define the Thumbnail model
+class Thumbnail(Document):
+    id = IntField(primary_key=True)
+    msg_id = IntField()
 
-
-def start() -> scoped_session:
-    engine = create_engine(Config.DB_URI, client_encoding="utf8")
-    BASE.metadata.bind = engine
-    BASE.metadata.create_all(engine)
-    return scoped_session(sessionmaker(bind=engine, autoflush=False))
-
-
-BASE = declarative_base()
-SESSION = start()
-
-INSERTION_LOCK = threading.RLock()
-
-class Thumbnail(BASE):
-    __tablename__ = "thumbnail"
-    id = Column(Integer, primary_key=True)
-    msg_id = Column(Integer)
-    
-    def __init__(self, id, msg_id):
-        self.id = id
-        self.msg_id = msg_id
-
-Thumbnail.__table__.create(checkfirst=True)
-
+# Function to add/update a thumbnail
 async def df_thumb(id, msg_id):
-    with INSERTION_LOCK:
-        msg = SESSION.query(Thumbnail).get(id)
-        if not msg:
-            msg = Thumbnail(id, msg_id)
-            SESSION.add(msg)
-            SESSION.flush()
-        else:
-            SESSION.delete(msg)
-            file = Thumbnail(id, msg_id)
-            SESSION.add(file)
-        SESSION.commit()
+    thumb = Thumbnail.objects(id=id).first()
+    if thumb:
+        thumb.msg_id = msg_id
+    else:
+        thumb = Thumbnail(id=id, msg_id=msg_id)
+    thumb.save()
 
+# Function to delete a thumbnail
 async def del_thumb(id):
-    with INSERTION_LOCK:
-        msg = SESSION.query(Thumbnail).get(id)
-        SESSION.delete(msg)
-        SESSION.commit()
+    Thumbnail.objects(id=id).delete()
 
+# Function to retrieve a thumbnail
 async def thumb(id):
-    try:
-        t = SESSION.query(Thumbnail).get(id)
-        return t
-    finally:
-        SESSION.close()
+    return Thumbnail.objects(id=id).first()
+    
